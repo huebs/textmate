@@ -1,5 +1,6 @@
 # Changes
 
+<<<<<<< HEAD
 ## 2013-06-24 ([a9437](https://github.com/textmate/textmate/compare/a9435...a9437))
 
 * With the find dialog showing for a document, it is now possible to use ⌥⌘F to activate “Find All”. Be aware that Edit → Find → Find All without the dialog showing is really “select all matches” (possibly limited to a selection).
@@ -19,10 +20,11 @@
 * Miscellaneous fixes.
 
 ## 2013-05-26 ([a9427](https://github.com/textmate/textmate/compare/a9423...a9427))
+=======
+## 2013-05-18 ([a9425](https://github.com/textmate/textmate/compare/a9423...a9425))
+>>>>>>> Revert "Checkin release notes"
 
-* A bundle’s `info.plist` can now use the `requiredCommands` key. All items in the bundle will inherit the requirements, though they are presently only checked for commands and drag commands.
-* Failing to set/remove extended attributes is no longer treated as an error (to improve compatibility with various file systems).
-* Add SOCKS proxy support for updating and crash report submissions.
+* Add missing variables (like `PATH`) for export commands.
 
 ## 2013-05-17 ([a9423](https://github.com/textmate/textmate/compare/a9419...a9423))
 
