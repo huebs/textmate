@@ -6,7 +6,6 @@
 #include <oak/callbacks.h>
 #include <regexp/find.h>
 #include <command/parser.h>
-#include <command/runner.h>
 #include <document/document.h>
 #include <layout/layout.h>
 
@@ -152,11 +151,20 @@ namespace ng
 
 	PUBLIC action_t to_action (std::string const& sel);
 
+	struct editor_delegate_t
+	{
+		virtual ~editor_delegate_t () { }
+		virtual std::map<std::string, std::string> variables_for_bundle_item (bundles::item_ptr item) = 0;
+	};
+
 	struct PUBLIC editor_t
 	{
 		editor_t ();
 		editor_t (buffer_t& buffer);
 		editor_t (document::document_ptr document);
+
+		editor_delegate_t* delegate () const            { return _delegate; }
+		void set_delegate (editor_delegate_t* delegate) { _delegate = delegate; }
 
 		void perform (action_t action, layout_t const* layout = NULL, bool indentCorrections = false, std::string const& scopeAttributes = NULL_STR);
 
@@ -174,7 +182,7 @@ namespace ng
 		void execute_dispatch (plist::dictionary_t const& args, std::map<std::string, std::string> const& variables);
 
 		scope::context_t scope (std::string const& scopeAttributes) const;
-		std::map<std::string, std::string> variables (std::map<std::string, std::string> map, std::string const& scopeAttributes) const;
+		std::map<std::string, std::string> editor_variables (std::string const& scopeAttributes) const;
 
 		std::vector<std::string> const& choices () const;
 		std::string placeholder_content (ng::range_t* placeholderSelection = NULL) const;
@@ -282,6 +290,7 @@ namespace ng
 		clipboard_ptr _yank_clipboard;
 		bool _extend_yank_clipboard = false;
 
+		editor_delegate_t* _delegate = NULL;
 		document::document_ptr _document;
 	};
 

@@ -1,5 +1,28 @@
 # Changes
 
+## 2013-05-26 ([a9427](https://github.com/textmate/textmate/compare/a9423...a9427))
+
+* A bundle’s `info.plist` can now use the `requiredCommands` key. All items in the bundle will inherit the requirements, though they are presently only checked for commands and drag commands.
+* Failing to set/remove extended attributes is no longer treated as an error (to improve compatibility with various file systems).
+* Add SOCKS proxy support for updating and crash report submissions.
+
+## 2013-05-17 ([a9423](https://github.com/textmate/textmate/compare/a9419...a9423))
+
+* TextMate should now work with _Proxy Auto Discovery_ (for updating itself and the managed bundles).
+* A bunch of (work in progress) refactoring has caused some changes to executing commands:
+	- Scoped variables (which are set via bundle settings) are now setup before the variables in Preferences → Variables, which in turn are setup before path specific variables (`.tm_properties`). This matters when you want to override or augment variables. For example, if you want to setup commenting style variables, you previously had to edit the existing variables found in the language’s bundle. You can now place the variables in `.tm_properties` in a group with the proper scope selector — although presently scope selectors in `.tm_properties` are matched against the file’s scope, not that of the caret (so for languages that are likely embedded, it’s still best to set the variables via a bundle item).
+	- The `requiredCommands` bundle item key (to specify required shell commands) can now be used for completion commands as well. Long-term this will be usable with all types of bundle items (e.g. a snippet or macro may also require the presence of certain shell commands).
+	- The working directory of the command being executed is unspecified except for drop commands (where it is the parent of the current file). We have never documented what the working directory is set to, and if you need it to be set to something specific (e.g. `TM_PROJECT_DIRECTORY`) then you should set it yourself.
+	- Commands being run via `TextMate.system` (JavaScript in HTML output) no longer support being an inline shebang-script.
+	- Shell code embedded in snippets and run via `TextMate.system` no longer source `TM_SUPPORT_PATH/lib/bash_init.sh`.
+
+## 2013-05-02 ([a9419](https://github.com/textmate/textmate/compare/a9417...a9419))
+
+* _Full Screen_ is now assigned to ⌃⌘F to follow Apple’s recommendations. Previously this key was used for _Replace All_ which is now instead ⌃⌘G and _Replace All in Selection_ is ⌃⇧⌘G. This is somewhat consistent with _Replace & Find_ bound to ⌥⌘G.
+* The scope selector used to inject grammar rules can now match against the left scope to make the injected rule rank higher than the rules from the context it gets injected into. *[Joachim Mårtensson]*
+* Swipe gestures (in file browser and HTML windows) to go back/forward in history is now detected differently. Some users have reported that scrolling up/down in the file browser was sometimes triggering an undesired swipe action, hopefully the new code works better. If not, you can let me know via IRC or the mailing list.
+* The bundles in Preferences → Bundles now show link arrows to go to the bundle’s (GitHub) page where you can find its issue tracker, detailed version history, instructions on how to clone the bundle, and it’s the origin for which you can submit pull requests.
+
 ## 2013-04-25 ([a9417](https://github.com/textmate/textmate/compare/a9415...a9417))
 
 * By default, font smoothing is now only disabled (for dark themes) on high-DPI displays. See [wiki for how to control font smoothing](https://github.com/textmate/textmate/wiki/Hidden-Settings#controlling-font-smoothing).

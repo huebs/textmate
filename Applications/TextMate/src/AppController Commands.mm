@@ -22,7 +22,9 @@ OAK_DEBUG_VAR(AppController_Commands);
 	if(bundles::item_ptr item = bundles::lookup(to_s(uuidString)))
 	{
 		DocumentController* delegate = (DocumentController*)[[NSApp mainWindow] delegate];
-		if([delegate respondsToSelector:@selector(performBundleItem:)])
+		if(![delegate respondsToSelector:@selector(performBundleItem:)])
+			delegate = [NSApp targetForAction:@selector(performBundleItem:)];
+		if(delegate)
 			return [delegate performBundleItem:item];
 
 		switch(item->kind())
@@ -41,7 +43,11 @@ OAK_DEBUG_VAR(AppController_Commands);
 
 			case bundles::kItemTypeCommand:
 			{
-				document::run(parse_command(item), ng::buffer_t(), ng::ranges_t(), document::document_ptr());
+				std::map<std::string, std::string> map = oak::basic_environment();
+				map << item->bundle_variables();
+				map = bundles::scope_variables(map);
+				map = variables_for_path(map);
+				document::run(parse_command(item), ng::buffer_t(), ng::ranges_t(), document::document_ptr(), map);
 			}
 			break;
 

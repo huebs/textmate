@@ -6,12 +6,11 @@
 #include <text/ctype.h>
 #include <text/classification.h>
 #include <text/utf8.h>
+#include <text/hexdump.h>
 #include <text/parse.h>
 #include <text/tokenize.h>
 #include <text/trim.h>
-#include <OakSystem/command.h>
-#include <cf/run_loop.h>
-#include <command/runner.h>
+#include <io/exec.h>
 
 namespace ng
 {
@@ -374,27 +373,44 @@ namespace ng
 		{
 			std::string run_command (std::string const& cmd, std::map<std::string, std::string> const& environment)
 			{
-				struct command_t : oak::command_t
+				__block int status = 0;
+				__block std::string output, error;
+
+				std::string scriptPath = NULL_STR;
+				std::vector<std::string> argv{ "/bin/sh", "-c", cmd };
+				if(cmd.substr(0, 2) == "#!")
 				{
-					void did_exit (int rc, std::string const& output, std::string const& error)
-					{
-						result = rc == 0 ? output : error;
-						run_loop.stop();
-					}
+					argv = { scriptPath = path::temp("snippet_command") };
+					path::set_content(scriptPath, cmd);
+					chmod(scriptPath.c_str(), S_IRWXU);
+				}
 
-					std::string result;
-					cf::run_loop_t run_loop;
-				};
+				if(io::process_t process = io::spawn(argv, environment))
+				{
+					close(process.in);
 
-				command_t runner;
-				runner.command = cmd;
-				runner.environment = environment;
+					dispatch_group_t group = dispatch_group_create();
+					dispatch_group_async(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+						io::exhaust_fd(process.out, &output);
+					});
+					dispatch_group_async(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+						io::exhaust_fd(process.err, &error);
+					});
+					dispatch_group_async(group, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+						if(waitpid(process.pid, &status, 0) != process.pid)
+							perror("waitpid");
+					});
+					dispatch_group_wait(group, DISPATCH_TIME_FOREVER);
+					dispatch_release(group);
+				}
 
-				command::fix_shebang(&runner.command);
+				if(scriptPath != NULL_STR)
+					unlink(scriptPath.c_str());
 
-				runner.launch();
-				runner.run_loop.start();
-				return runner.result;
+				std::string const& res = WIFEXITED(status) && WEXITSTATUS(status) == 0 ? output : error;
+				if(!utf8::is_valid(res.begin(), res.end()))
+					return text::to_hex(res.begin(), res.end());
+				return res;
 			}
 
 		} callback;
@@ -1281,8 +1297,10 @@ namespace ng
 		_selections = this->replace(replacements, true);
 	}
 
-	bool editor_t::handle_result (std::string const& out, output::type placement, output_format::type format, output_caret::type outputCaret, text::range_t input_range, std::map<std::string, std::string> environment)
+	bool editor_t::handle_result (std::string const& uncheckedOut, output::type placement, output_format::type format, output_caret::type outputCaret, text::range_t input_range, std::map<std::string, std::string> environment)
 	{
+		std::string const& out = utf8::is_valid(uncheckedOut.begin(), uncheckedOut.end()) ? uncheckedOut : text::to_hex(uncheckedOut.begin(), uncheckedOut.end());
+
 		range_t range;
 		switch(placement)
 		{
@@ -1365,15 +1383,16 @@ namespace ng
 		return ng::scope(_buffer, _selections, scopeAttributes);
 	}
 
-	std::map<std::string, std::string> editor_t::variables (std::map<std::string, std::string> map, std::string const& scopeAttributes) const
+	std::map<std::string, std::string> editor_t::editor_variables (std::string const& scopeAttributes) const
 	{
-		if(_document)
-				map = _document->variables(map);
-		else	map = variables_for_path(NULL_STR, "", map);
+		std::map<std::string, std::string> map = {
+			{ "TM_TAB_SIZE",  std::to_string(_buffer.indent().tab_size()) },
+			{ "TM_SOFT_TABS", _buffer.indent().soft_tabs() ? "YES" : "NO" },
+			{ "TM_SELECTION", to_s(_buffer, _selections)                  },
+		};
 
-		map.insert(std::make_pair("TM_TAB_SIZE", std::to_string(_buffer.indent().tab_size())));
-		map.insert(std::make_pair("TM_SOFT_TABS", _buffer.indent().soft_tabs() ? "YES" : "NO"));
-		map.insert(std::make_pair("TM_SELECTION", to_s(_buffer, _selections)));
+		scope::context_t const& s = scope(scopeAttributes);
+		map.insert(std::make_pair("TM_SCOPE", to_s(s.right)));
 
 		if(_selections.size() == 1)
 		{
@@ -1391,7 +1410,7 @@ namespace ng
 				map.insert(std::make_pair("TM_CURRENT_WORD",  _buffer.substr(wordRange.min().index, wordRange.max().index)));
 				map.insert(std::make_pair("TM_CURRENT_LINE",  _buffer.substr(_buffer.begin(pos.line), _buffer.eol(pos.line))));
 
-				map.insert(std::make_pair("TM_SCOPE_LEFT",    to_s(_buffer.scope(caret).left)));
+				map.insert(std::make_pair("TM_SCOPE_LEFT",    to_s(s.left)));
 			}
 			else
 			{
@@ -1413,10 +1432,7 @@ namespace ng
 				}
 			}
 		}
-
-		scope::context_t const& s = scope(scopeAttributes);
-		map.insert(std::make_pair("TM_SCOPE", to_s(s.right)));
-		return bundles::environment(s, map);
+		return map;
 	}
 
 	// ========

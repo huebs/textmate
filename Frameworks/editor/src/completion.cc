@@ -76,19 +76,38 @@ namespace ng
 			cmd.output        = output::replace_selection;
 			cmd.output_format = output_format::completion_list;
 
-			std::map<std::string, std::string> env = variables(item->environment(), scopeAttributes);
-			env["TM_CURRENT_WORD"] = prefix;
-			completion_command_delegate_ptr delegate(new completion_command_delegate_t(_buffer, _selections));
-			command::runner_ptr runner = command::runner(cmd, _buffer, _selections, env, delegate);
-			runner->launch();
-			runner->wait();
-
-			if(delegate->result != NULL_STR)
+			std::map<std::string, std::string> env;
+			if(_delegate)
 			{
-				citerate(line, text::tokenize(delegate->result.begin(), delegate->result.end(), '\n'))
+				env = _delegate->variables_for_bundle_item(item);
+			}
+			else
+			{
+				env << oak::basic_environment() << editor_variables(scopeAttributes) << item->bundle_variables();
+				env = bundles::scope_variables(env, this->scope(scopeAttributes));
+				env = variables_for_path(env, NULL_STR, this->scope(scopeAttributes).right);
+			}
+			env["TM_CURRENT_WORD"] = prefix;
+
+			bundles::required_command_t failedRequirement;
+			if(missing_requirement(item, env, &failedRequirement))
+			{
+				fprintf(stderr, "Failed running “%s” due to missing dependency “%s”.\n", cmd.name.c_str(), failedRequirement.command.c_str());
+			}
+			else
+			{
+				completion_command_delegate_ptr delegate(new completion_command_delegate_t(_buffer, _selections));
+				command::runner_ptr runner = command::runner(cmd, _buffer, _selections, env, delegate);
+				runner->launch();
+				runner->wait();
+
+				if(delegate->result != NULL_STR)
 				{
-					if(!(*line).empty())
-						commandResult.push_back(*line);
+					for(auto line : text::tokenize(delegate->result.begin(), delegate->result.end(), '\n'))
+					{
+						if(!line.empty() && utf8::is_valid(line.begin(), line.end()))
+							commandResult.push_back(line);
+					}
 				}
 			}
 		}

@@ -10,6 +10,7 @@
 #import <OakAppKit/OakSound.h>
 #import <OakAppKit/OakFileIconImage.h>
 #import <OakTextView/OakDocumentView.h>
+#import <command/runner.h> // fix_shebang
 #import <plist/ascii.h>
 #import <plist/delta.h>
 #import <text/decode.h>
@@ -255,7 +256,7 @@ static be::entry_ptr parent_for_column (NSBrowser* aBrowser, NSInteger aColumn, 
 	bundles::item_ptr bundle = row != -1 ? bundles->children()[row]->represented_item() : bundles::item_ptr();
 	if(aType == bundles::kItemTypeBundle || bundle)
 	{
-		std::map<std::string, std::string> environment = variables_for_path();
+		std::map<std::string, std::string> environment = variables_for_path(oak::basic_environment());
 		ABMutableMultiValue* value = [[[ABAddressBook sharedAddressBook] me] valueForProperty:kABEmailProperty];
 		if(NSString* email = [value valueAtIndex:[value indexForIdentifier:[value primaryIdentifier]]])
 			environment.insert(std::make_pair("TM_ROT13_EMAIL", decode::rot13(to_s(email))));
@@ -383,7 +384,7 @@ static be::entry_ptr parent_for_column (NSBrowser* aBrowser, NSInteger aColumn, 
 
 	plist::dictionary_t plist = plist::convert((__bridge CFPropertyListRef)bundleItemProperties);
 
-	std::string const& content = bundleItemContent->buffer().substr(0, bundleItemContent->buffer().size());
+	std::string const& content = bundleItemContent->content();
 	item_info_t const& info = info_for(bundleItem->kind());
 
 	plist::any_t parsedContent;

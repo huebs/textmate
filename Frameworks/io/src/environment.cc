@@ -11,7 +11,7 @@ namespace oak
 {
 	std::map<std::string, std::string> setup_basic_environment ()
 	{
-		std::string whitelistStr = "Apple_*:COMMAND_MODE:SHELL:SHLVL:SSH_AUTH_SOCK:__CF_USER_TEXT_ENCODING";
+		std::string whitelistStr = "Apple_*:COMMAND_MODE:DIALOG*:SHELL:SHLVL:SSH_AUTH_SOCK:__CF_USER_TEXT_ENCODING";
 		if(CFStringRef userWhitelist = (CFStringRef)CFPreferencesCopyAppValue(CFSTR("environmentWhitelist"), kCFPreferencesCurrentApplication))
 		{
 			if(CFGetTypeID(userWhitelist) == CFStringGetTypeID())
@@ -55,6 +55,10 @@ namespace oak
 		res.insert(std::make_pair("TMPDIR",  path::temp()));
 		res.insert(std::make_pair("LOGNAME", entry->pw_name));
 		res.insert(std::make_pair("USER",    entry->pw_name));
+
+		res.insert(std::make_pair("TM_APP_IDENTIFIER", cf::to_s(CFBundleGetIdentifier(CFBundleGetMainBundle()))));
+		res.insert(std::make_pair("TM_FULLNAME",       entry->pw_gecos ?: "John Doe"));
+		res.insert(std::make_pair("TM_PID",            std::to_string(getpid())));
 
 		return res;
 	}

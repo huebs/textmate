@@ -38,29 +38,8 @@ namespace file
 		}
 
 		res.push_back(text::format("attr.os-version.%zu.%zu.%zu", oak::os_major(), oak::os_minor(), oak::os_patch()));
-
-		std::string const parentDir = dir == NULL_STR ? path::parent(path) : dir;
-		res.push_back(settings_for_path(path, text::join(res, " "), parentDir).get(kSettingsScopeAttributesKey, ""));
 		res.erase(std::remove(res.begin(), res.end(), ""), res.end());
 		return text::join(res, " ");
 	}
 
-	std::map<std::string, std::string> variables (std::string const& path)
-	{
-		std::map<std::string, std::string> map;
-		if(path != NULL_STR)
-		{
-			map["TM_DISPLAYNAME"] = path::display_name(path);
-			map["TM_FILEPATH"]    = path;
-			map["TM_FILENAME"]    = path::name(path);
-			map["TM_DIRECTORY"]   = path::parent(path);
-			map["PWD"]            = path::parent(path);
-		}
-		else
-		{
-			map["TM_DISPLAYNAME"] = "untitled";
-		}
-		return variables_for_path(path, "", map);
-	}
-	
 } /* file */

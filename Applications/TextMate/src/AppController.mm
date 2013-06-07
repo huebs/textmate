@@ -145,8 +145,8 @@ BOOL HasDocumentWindow (NSArray* windows)
 
 	NSDate* currentDate    = [NSDate date];
 	NSDate* compileDate    = [NSDate dateWithString:@COMPILE_DATE @" 00:00:00 +0000"];
-	NSDate* warningDate    = [compileDate dateByAddingTimeInterval:30*kSecondsPerDay];
-	NSDate* expirationDate = [compileDate dateByAddingTimeInterval:60*kSecondsPerDay];
+	NSDate* warningDate    = [compileDate dateByAddingTimeInterval:45*kSecondsPerDay];
+	NSDate* expirationDate = [compileDate dateByAddingTimeInterval:90*kSecondsPerDay];
 
 	if([currentDate laterDate:expirationDate] == currentDate)
 	{
@@ -158,7 +158,8 @@ BOOL HasDocumentWindow (NSArray* windows)
 	else if([currentDate laterDate:warningDate] == currentDate)
 	{
 		NSInteger daysUntilExpiration = floor([expirationDate timeIntervalSinceNow] / kSecondsPerDay);
-		NSInteger choice = NSRunAlertPanel(@"TextMate is Outdated!", @"You are using a preview of TextMate 2 which is more than a month old. It will stop working in %ld day%s.", @"Visit Website", @"Cancel", nil, daysUntilExpiration, daysUntilExpiration == 1 ? "" : "s");
+		NSInteger weeksSinceCompilation = floor(-[compileDate timeIntervalSinceNow] / kSecondsPerDay / 7);
+		NSInteger choice = NSRunAlertPanel(@"TextMate is Outdated!", @"You are using a preview of TextMate 2 which is more than %ld weeks old. It will stop working in %ld day%s.", @"Visit Website", @"Cancel", nil, weeksSinceCompilation, daysUntilExpiration, daysUntilExpiration == 1 ? "" : "s");
 		if(choice == NSAlertDefaultReturn) // "Visit Website"
 			[[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://macromates.com/download"]];
 	}
@@ -469,10 +470,10 @@ BOOL HasDocumentWindow (NSArray* windows)
 	ASSERT([sender respondsToSelector:@selector(selectedItems)]);
 	ASSERT([[sender selectedItems] count] == 1);
 
-	self.filterWindowController = nil;
-
 	if(NSString* uuid = [[[sender selectedItems] lastObject] objectForKey:@"uuid"])
 		[[BundleEditor sharedInstance] revealBundleItem:bundles::lookup(to_s(uuid))];
+
+	self.filterWindowController = nil;
 }
 
 - (void)editBundleItemWithUUIDString:(NSString*)uuidString

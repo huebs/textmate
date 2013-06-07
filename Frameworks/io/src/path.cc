@@ -397,6 +397,18 @@ namespace path
 		}
 	}
 
+	bool identifier_t::can_trust_inode () const
+	{
+		if(exists && inode == 999999999) // Zero-length files on FAT file systems share this magic value
+		{
+			struct statfs sfsb;
+			if(statfs(path.c_str(), &sfsb) == 0)
+				return strcasecmp(sfsb.f_fstypename, "msdos") == 0 && strcasecmp(sfsb.f_fstypename, "exfat") == 0;
+			perror("statfs");
+		}
+		return true;
+	}
+
 	bool identifier_t::operator< (identifier_t const& rhs) const
 	{
 		if(path == rhs.path)
@@ -405,15 +417,20 @@ namespace path
 		if(exists == rhs.exists)
 		{
 			if(exists)
-					return device == rhs.device ? inode < rhs.inode : device < rhs.device;
-			else	return path < rhs.path;
+			{
+				if(device != rhs.device)
+					return device < rhs.device;
+				else if(can_trust_inode() && rhs.can_trust_inode())
+					return inode < rhs.inode;
+			}
+			return path < rhs.path;
 		}
 		return !exists && rhs.exists;
 	}
 
 	bool identifier_t::operator== (identifier_t const& rhs) const
 	{
-		return path == rhs.path || (exists && rhs.exists && device == rhs.device && inode == rhs.inode);
+		return path == rhs.path || (exists && rhs.exists && device == rhs.device && inode == rhs.inode && can_trust_inode());
 	}
 
 	bool identifier_t::operator!= (identifier_t const& rhs) const
@@ -712,73 +729,9 @@ namespace path
 		return NULL_STR;
 	}
 
-	// ==========
-	// = Walker =
-	// ==========
-
-	void walker_t::rebalance () const
-	{
-		while(files.empty() && !paths.empty())
-		{
-			struct dirent** entries;
-			int size = scandir(paths.front().c_str(), &entries, NULL, NULL);
-			if(size != -1)
-			{
-				for(int i = 0; i < size; ++i)
-				{
-					std::string const& name = entries[i]->d_name;
-					if(name != "." && name != "..")
-					{
-						std::string const& path = join(paths.front(), name);
-						if(seen.insert(identifier(path)).second)
-							files.push_back(path);
-					}
-					free(entries[i]);
-				}
-				free(entries);
-			}
-			paths.erase(paths.begin());
-		}
-	}
-
-	void walker_t::push_back (std::string const& dir)
-	{
-		paths.push_back(dir);
-		rebalance();
-	}
-
-	bool walker_t::equal (size_t lhs, size_t rhs) const
-	{
-		if(paths.empty())
-				return std::min(lhs, files.size()) == std::min(rhs, files.size());
-		else	return lhs == rhs;
-	}
-
-	std::string const& walker_t::at (size_t index) const
-	{
-		ASSERT_LT(index, files.size());
-		return files[index];
-	}
-
-	size_t walker_t::advance_from (size_t index) const
-	{
-		if(index + 1 == files.size())
-		{
-			files.clear();
-			rebalance();
-			return 0;
-		}
-		return index + 1;
-	}
-
 	// ===========
 	// = Actions =
 	// ===========
-
-	walker_ptr open_for_walk (std::string const& path, std::string const& glob)
-	{
-		return walker_ptr(new walker_t(path, glob));
-	}
 
 	std::string content (std::string const& path)
 	{
@@ -891,22 +844,19 @@ namespace path
 			res = true;
 			iterate(pair, attributes)
 			{
-				bool removeAttr = pair->second == NULL_STR;
 				int rc = 0;
-				if(removeAttr)
+				if(pair->second == NULL_STR)
 						rc = fremovexattr(fd, pair->first.c_str(), 0);
 				else	rc = fsetxattr(fd, pair->first.c_str(), pair->second.data(), pair->second.size(), 0, 0);
 
-				if(rc != 0 && removeAttr && errno == ENOATTR)
-					rc = 0;
-				else if(rc != 0 && removeAttr && errno == EINVAL) // We get this from AFP when removing a non-existing attribute
-					rc = 0;
-				else if(rc != 0 && !removeAttr && errno == ENOENT) // We get this from Samba saving to ext4 via virtual machine
-					rc = 0;
-				else if(rc != 0)
-					perror((removeAttr ? text::format("fremovexattr(%d, \"%s\")", fd, pair->first.c_str()) : text::format("fsetxattr(%d, %s, \"%s\")", fd, pair->first.c_str(), pair->second.c_str())).c_str());
-
-				res = res && rc == 0;
+				if(rc != 0 && errno != ENOTSUP && errno != ENOATTR)
+				{
+					// We only log the error since:
+					// fremovexattr() on AFP for non-existing attributes gives us EINVAL
+					// fsetxattr() on Samba saving to ext4 via virtual machine gives us ENOENT
+					// sshfs with ‘-o noappledouble’ will return ENOATTR or EPERM
+					perror((pair->second == NULL_STR ? text::format("fremovexattr(%d, \"%s\")", fd, pair->first.c_str()) : text::format("fsetxattr(%d, %s, \"%s\")", fd, pair->first.c_str(), pair->second.c_str())).c_str());
+				}
 			}
 			close(fd);
 		}

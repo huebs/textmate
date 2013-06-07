@@ -43,8 +43,6 @@ namespace bundles
 
 	struct PUBLIC item_t
 	{
-		typedef std::map<std::string, std::string> string_map_t; // kludge to support empty map as a default argument
-
 		std::string const& name () const;
 		void set_name (std::string const& newName);
 		std::string const& full_name () const;
@@ -52,7 +50,7 @@ namespace bundles
 		oak::uuid_t const& uuid () const;
 		oak::uuid_t bundle_uuid () const;
 		scope::selector_t const& scope_selector () const;
-		std::map<std::string, std::string> environment (std::map<std::string, std::string> base = string_map_t()) const;
+		std::map<std::string, std::string> bundle_variables () const;
 		plist::dictionary_t const& plist () const;
 		kind_t kind () const;
 

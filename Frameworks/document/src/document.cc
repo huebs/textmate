@@ -210,26 +210,26 @@ namespace document
 				}
 			}
 
-			path::walker_ptr walker = path::open_for_walk(session_dir());
-			iterate(path, *walker)
+			for(auto dirEntry : path::entries(session_dir()))
 			{
-				std::string const& attr = path::get_attr(*path, "com.macromates.backup.identifier");
+				std::string const path = path::join(session_dir(), dirEntry->d_name);
+				std::string const attr = path::get_attr(path, "com.macromates.backup.identifier");
 				if(attr != NULL_STR && uuid == oak::uuid_t(attr))
 				{
 					document_ptr res = document_ptr(new document_t);
 
 					res->_identifier     = uuid;
-					res->_backup_path    = *path;
+					res->_backup_path    = path;
 
-					res->_path           = path::get_attr(*path, "com.macromates.backup.path");
+					res->_path           = path::get_attr(path, "com.macromates.backup.path");
 					res->_key            = path::identifier_t(res->_path);
-					res->_file_type      = path::get_attr(*path, "com.macromates.backup.file-type");
-					res->_disk_encoding  = path::get_attr(*path, "com.macromates.backup.encoding");
-					res->_disk_bom       = path::get_attr(*path, "com.macromates.backup.bom") == "YES";
-					res->_disk_newlines  = path::get_attr(*path, "com.macromates.backup.newlines");
-					res->_untitled_count = atoi(path::get_attr(*path, "com.macromates.backup.untitled-count").c_str());
-					res->_custom_name    = path::get_attr(*path, "com.macromates.backup.custom-name");
-					res->_modified       = path::get_attr(*path, "com.macromates.backup.modified") == "YES";
+					res->_file_type      = path::get_attr(path, "com.macromates.backup.file-type");
+					res->_disk_encoding  = path::get_attr(path, "com.macromates.backup.encoding");
+					res->_disk_bom       = path::get_attr(path, "com.macromates.backup.bom") == "YES";
+					res->_disk_newlines  = path::get_attr(path, "com.macromates.backup.newlines");
+					res->_untitled_count = atoi(path::get_attr(path, "com.macromates.backup.untitled-count").c_str());
+					res->_custom_name    = path::get_attr(path, "com.macromates.backup.custom-name");
+					res->_modified       = path::get_attr(path, "com.macromates.backup.modified") == "YES";
 
 					add(res);
 					return res;
@@ -299,10 +299,24 @@ namespace document
 			return res;
 		}
 
+		std::vector<document_ptr> all_documents ()
+		{
+			std::vector<document_ptr> res;
+
+			lock_t lock(this);
+			for(auto pair : documents)
+			{
+				if(document_ptr doc = pair.second.lock())
+					res.push_back(doc);
+			}
+
+			return res;
+		}
+
+	private:
 		std::map<oak::uuid_t, document_weak_ptr> documents;
 		std::map<path::identifier_t, document_weak_ptr> documents_by_path;
 
-	private:
 		void add (document_ptr doc)
 		{
 			ASSERT_EQ(lock_count, 1); // we assert that a lock has been obtained by the caller
@@ -330,7 +344,7 @@ namespace document
 		document_ptr doc = create();
 		if(fileType != NULL_STR)
 			doc->set_file_type(fileType);
-		doc->set_content(io::bytes_ptr(new io::bytes_t(content)));
+		doc->set_content(content);
 		return doc;
 	}
 
@@ -451,8 +465,6 @@ namespace document
 	document_t::~document_t ()
 	{
 		D(DBF_Document, bug("%s\n", display_name().c_str()););
-		if(_grammar)
-			_grammar->remove_callback(&_grammar_callback);
 		if(_path != NULL_STR && _buffer)
 			document::marks.set(_path, marks());
 		documents.remove(_identifier, _key);
@@ -484,20 +496,20 @@ namespace document
 		return _file_type;
 	}
 
-	std::map<std::string, std::string> document_t::variables (std::map<std::string, std::string> map, bool sourceFileSystem) const
+	std::map<std::string, std::string> document_t::document_variables () const
 	{
-		map["TM_DISPLAYNAME"]   = display_name();
-		map["TM_DOCUMENT_UUID"] = to_s(identifier());
+		std::map<std::string, std::string> map = {
+			{ "TM_DISPLAYNAME",    display_name()     },
+			{ "TM_DOCUMENT_UUID",  to_s(identifier()) },
+		};
 
 		if(path() != NULL_STR)
 		{
 			map["TM_FILEPATH"]  = path();
 			map["TM_FILENAME"]  = path::name(path());
 			map["TM_DIRECTORY"] = path::parent(path());
-			map["PWD"]          = path::parent(path());
 		}
-
-		return sourceFileSystem ? variables_for_path(path(), scope(), map) : map;
+		return map;
 	}
 
 	void document_t::setup_buffer ()
@@ -507,22 +519,12 @@ namespace document
 		{
 			citerate(item, bundles::query(bundles::kFieldGrammarScope, _file_type, scope::wildcard, bundles::kItemTypeGrammar))
 			{
-				if(parse::grammar_ptr grammar = parse::parse_grammar(*item))
-				{
-					if(_grammar)
-						_grammar->remove_callback(&_grammar_callback);
-
-					_grammar = grammar;
-					_grammar->add_callback(&_grammar_callback);
-
-					_buffer->set_grammar(*item);
-
-					break;
-				}
+				_buffer->set_grammar(*item);
+				break;
 			}
 		}
 
-		settings_t const& settings = this->settings();
+		settings_t const settings = settings_for_path(virtual_path(), file_type(), path::parent(_path), document_variables());
 		_buffer->indent() = text::indent_t(settings.get(kSettingsTabSizeKey, 4), SIZE_T_MAX, settings.get(kSettingsSoftTabsKey, false));
 		_buffer->set_spelling_language(settings.get(kSettingsSpellingLanguageKey, "en"));
 		_buffer->set_live_spelling(settings.get(kSettingsSpellCheckingKey, false));
@@ -532,18 +534,13 @@ namespace document
 		D(DBF_Document, bug("done\n"););
 	}
 
-	void document_t::grammar_did_change ()
-	{
-		_buffer->set_grammar(bundles::lookup(_grammar->uuid())); // Preferably we’d pass _grammar to the buffer but then the buffer couldn’t get at the root scope and folding markers. Perhaps this should be exposed by grammar_t, but ideally the buffer itself would setup a callback to be notified about grammar changes. We only moved it to document_t because with a callback, buffer_t can’t get copy constructors for free.
-	}
-
 	void document_t::mark_pristine ()
 	{
 		ASSERT(_buffer);
-		_pristine_buffer = _buffer->substr(0, _buffer->size()); // TODO We should use a cheap ng::detail::storage_t copy
+		_pristine_buffer = content(); // TODO We should use a cheap ng::detail::storage_t copy
 	}
 
-	void document_t::post_load (std::string const& path, io::bytes_ptr content, std::map<std::string, std::string> const& attributes, std::string const& fileType, std::string const& pathAttributes, encoding::type const& encoding)
+	void document_t::post_load (std::string const& path, io::bytes_ptr content, std::map<std::string, std::string> const& attributes, std::string const& fileType, encoding::type const& encoding)
 	{
 		_open_callback.reset();
 		if(!content)
@@ -551,8 +548,6 @@ namespace document
 			_open_count = 0;
 			return;
 		}
-
-		_path_attributes = pathAttributes;
 
 		_disk_encoding = encoding.charset();
 		_disk_newlines = encoding.newlines();
@@ -592,7 +587,7 @@ namespace document
 		broadcast(callback_t::did_change_open_status);
 	}
 
-	void document_t::post_save (std::string const& path, io::bytes_ptr content, std::string const& pathAttributes, encoding::type const& encoding, bool success)
+	void document_t::post_save (std::string const& path, io::bytes_ptr content, encoding::type const& encoding, bool success)
 	{
 		if(success)
 		{
@@ -604,8 +599,6 @@ namespace document
 				broadcast(callback_t::did_change_on_disk_status);
 			}
 
-			_path_attributes = pathAttributes;
-
 			_disk_encoding = encoding.charset();
 			_disk_bom      = encoding.byte_order_mark();
 			_disk_newlines = encoding.newlines();
@@ -613,13 +606,6 @@ namespace document
 			check_modified(revision(), revision());
 			mark_pristine();
 			broadcast(callback_t::did_save);
-
-			D(DBF_Document, bug("search for ‘did save’ hooks in scope ‘%s’\n", to_s(scope()).c_str()););
-			citerate(item, bundles::query(bundles::kFieldSemanticClass, "callback.document.did-save", scope()))
-			{
-				D(DBF_Document, bug("%s\n", (*item)->name().c_str()););
-				document::run(parse_command(*item), buffer(), ng::ranges_t(), shared_from_this());
-			}
 		}
 
 		if(_is_on_disk)
@@ -657,9 +643,9 @@ namespace document
 			void obtain_authorization (std::string const& path, io::bytes_ptr content, osx::authorization_t auth, file::save_context_ptr context) { _callback->obtain_authorization(path, content, auth, context); }
 			void select_charset (std::string const& path, io::bytes_ptr content, std::string const& charset, file::save_context_ptr context)      { _callback->select_charset(path, content, charset, context); }
 
-			void did_save (std::string const& path, io::bytes_ptr content, std::string const& pathAttributes, encoding::type const& encoding, bool success, std::string const& message, oak::uuid_t const& filter)
+			void did_save (std::string const& path, io::bytes_ptr content, encoding::type const& encoding, bool success, std::string const& message, oak::uuid_t const& filter)
 			{
-				_document->post_save(path, content, pathAttributes, encoding, success);
+				_document->post_save(path, content, encoding, success);
 				_callback->did_save_document(_document, path, success, message, filter);
 				_document->close();
 			}
@@ -674,7 +660,7 @@ namespace document
 		if(!is_open())
 		{
 			if(!_content && _backup_path == NULL_STR)
-				return callback->did_save(_path, io::bytes_ptr(), _path_attributes, encoding::type(_disk_newlines, _disk_encoding, _disk_bom), false, NULL_STR, oak::uuid_t());
+				return callback->did_save(_path, io::bytes_ptr(), encoding::type(_disk_newlines, _disk_encoding, _disk_bom), false, NULL_STR, oak::uuid_t());
 		}
 
 		_file_watcher.reset();
@@ -811,7 +797,7 @@ namespace document
 			if(_backup_path != NULL_STR)
 			{
 				bool modified = _modified;
-				post_load(_path, io::bytes_ptr(new io::bytes_t(path::content(_backup_path))), path::attributes(_backup_path), _file_type, file::path_attributes(_path), encoding::type(_disk_newlines, _disk_encoding, _disk_bom));
+				post_load(_path, io::bytes_ptr(new io::bytes_t(path::content(_backup_path))), path::attributes(_backup_path), _file_type, encoding::type(_disk_newlines, _disk_encoding, _disk_bom));
 				if(modified)
 					set_revision(buffer().bump_revision());
 				return true;
@@ -875,9 +861,6 @@ namespace document
 
 		check_modified(-1, -1);
 
-		if(_grammar)
-			_grammar->remove_callback(&_grammar_callback);
-		_grammar.reset();
 		_undo_manager.reset();
 		_buffer.reset();
 		_pristine_buffer = NULL_STR;
@@ -932,7 +915,7 @@ namespace document
 				void select_file_type (std::string const& path, io::bytes_ptr content, file::open_context_ptr context)  { context->set_file_type(_document->_file_type); }
 				void show_error (std::string const& path, std::string const& message, oak::uuid_t const& filter)        { fprintf(stderr, "%s: %s\n", path.c_str(), message.c_str()); }
 
-				void show_content (std::string const& path, io::bytes_ptr content, std::map<std::string, std::string> const& attributes, std::string const& fileType, std::string const& pathAttributes, encoding::type const& encoding, std::vector<oak::uuid_t> const& binaryImportFilters, std::vector<oak::uuid_t> const& textImportFilters)
+				void show_content (std::string const& path, io::bytes_ptr content, std::map<std::string, std::string> const& attributes, std::string const& fileType, encoding::type const& encoding, std::vector<oak::uuid_t> const& binaryImportFilters, std::vector<oak::uuid_t> const& textImportFilters)
 				{
 					if(!_document->is_open())
 						return;
@@ -959,14 +942,17 @@ namespace document
 					else
 					{
 						bool conflict = false;
-						std::string const& merged = merge(_document->_pristine_buffer, mine, yours, &conflict);
+						std::string const merged = merge(_document->_pristine_buffer, mine, yours, &conflict);
 						D(DBF_Document_WatchFS, bug("changed on disk and we have local changes, merge conflict %s.\n%s\n", BSTR(conflict), merged.c_str()););
-						_document->undo_manager().begin_undo_group(ng::ranges_t(0));
-						_document->_buffer->replace(0, _document->_buffer->size(), merged);
-						_document->set_revision(_document->_buffer->bump_revision());
-						_document->undo_manager().end_undo_group(ng::ranges_t(0));
-						// TODO if there was a conflict, we shouldn’t take the merged content (but ask user what to do)
-						// TODO mark_pristine() but using ‘yours’
+						if(utf8::is_valid(merged.begin(), merged.end()))
+						{
+							_document->undo_manager().begin_undo_group(ng::ranges_t(0));
+							_document->_buffer->replace(0, _document->_buffer->size(), merged);
+							_document->set_revision(_document->_buffer->bump_revision());
+							_document->undo_manager().end_undo_group(ng::ranges_t(0));
+							// TODO if there was a conflict, we shouldn’t take the merged content (but ask user what to do)
+							// TODO mark_pristine() but using ‘yours’
+						}
 					}
 
 					if(_wait)
@@ -1003,12 +989,23 @@ namespace document
 		}
 	}
 
-	void document_t::set_content (io::bytes_ptr const& bytes)
+	void document_t::set_content (std::string const& str)
 	{
-		D(DBF_Document, bug("%.*s… (%zu bytes), file type %s\n", std::min<int>(32, bytes->size()), bytes->get(), bytes->size(), _file_type.c_str()););
-		ASSERT(!_buffer);
-		_content = bytes;
+		D(DBF_Document, bug("%.*s… (%zu bytes), file type %s\n", std::min<int>(32, str.size()), str.data(), str.size(), _file_type.c_str()););
+		if(_buffer)
+				_buffer->replace(0, _buffer->size(), str); 
+		else	_content.reset(new io::bytes_t(str));
 	}
+
+	std::string document_t::content () const
+	{
+		if(_buffer)
+			return _buffer->substr(0, _buffer->size());
+		else if(_content)
+			return std::string(_content->begin(), _content->end());
+		return NULL_STR;
+	}
+
 
 	namespace
 	{
@@ -1215,15 +1212,8 @@ namespace document
 	std::vector<document_ptr> scanner_t::open_documents ()
 	{
 		std::vector<document_ptr> res;
-
-		document_tracker_t::lock_t lock(&document::documents);
-		iterate(pair, document::documents.documents)
-		{
-			document_ptr doc = pair->second.lock();
-			if(doc && doc->is_open())
-				res.push_back(doc);
-		}
-
+		auto docs = document::documents.all_documents();
+		std::copy_if(docs.begin(), docs.end(), back_inserter(res), [](document::document_ptr doc){ return doc->is_open(); });
 		return res;
 	}
 
@@ -1233,13 +1223,8 @@ namespace document
 
 		if(includeUntitled)
 		{
-			document_tracker_t::lock_t lock(&document::documents);
-			iterate(pair, document::documents.documents)
-			{
-				document_ptr doc = pair->second.lock();
-				if(doc && doc->path() == NULL_STR)
-					documents.push_back(doc);
-			}
+			auto docs = document::documents.all_documents();
+			std::copy_if(docs.begin(), docs.end(), back_inserter(documents), [](document::document_ptr doc){ return doc->path() == NULL_STR; });
 		}
 
 		struct bootstrap_t { static void* main (void* arg) { ((scanner_t*)arg)->thread_main(); return NULL; } };

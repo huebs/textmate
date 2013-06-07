@@ -986,12 +986,14 @@ namespace
 {
 	if(_selectedDocument)
 	{
-		std::map<std::string, std::string> map = _documentSCMVariables.empty() ? _projectSCMVariables : _documentSCMVariables;
+		auto map = _selectedDocument->document_variables();
+		auto const& scm = _documentSCMVariables.empty() ? _projectSCMVariables : _documentSCMVariables;
+		map.insert(scm.begin(), scm.end());
 		if(self.projectPath)
 			map["projectDirectory"] = to_s(self.projectPath);
 
 		std::string docDirectory = _selectedDocument->path() != NULL_STR ? path::parent(_selectedDocument->path()) : to_s(self.untitledSavePath);
-		settings_t const settings = settings_for_path(_selectedDocument->virtual_path(), _selectedDocument->file_type() + " " + to_s(self.scopeAttributes), docDirectory, _selectedDocument->variables(map, false));
+		settings_t const settings = settings_for_path(_selectedDocument->virtual_path(), _selectedDocument->file_type() + " " + to_s(self.scopeAttributes), docDirectory, map);
 		self.window.title = [NSString stringWithCxxString:settings.get(kSettingsWindowTitleKey, to_s(self.documentDisplayName))];
 	}
 	else
@@ -1077,7 +1079,7 @@ namespace
 		{
 			__weak DocumentController* weakSelf = self;
 			_projectSCMInfo->add_callback(^(scm::info_t const& info){
-				weakSelf.projectSCMVariables = info.variables();
+				weakSelf.projectSCMVariables = info.scm_variables();
 			});
 		}
 		else
@@ -1139,7 +1141,7 @@ namespace
 			__weak DocumentController* weakSelf = self;
 			_documentSCMInfo->add_callback(^(scm::info_t const& info){
 				weakSelf.documentSCMStatus    = info.status(to_s(weakSelf.documentPath));
-				weakSelf.documentSCMVariables = info.variables();
+				weakSelf.documentSCMVariables = info.scm_variables();
 			});
 		}
 		else
@@ -1922,7 +1924,7 @@ namespace
 		}
 	}
 
-	settings_t const settings = _selectedDocument->settings();
+	settings_t const settings = settings_for_path(_selectedDocument->virtual_path(), _selectedDocument->file_type() + " " + to_s(self.scopeAttributes), _selectedDocument->path() != NULL_STR ? path::parent(_selectedDocument->path()) : to_s(self.untitledSavePath));
 	path::glob_t const excludeGlob(settings.get(kSettingsExcludeKey, ""));
 	path::glob_t const binaryGlob(settings.get(kSettingsBinaryKey, ""));
 
@@ -2234,24 +2236,19 @@ static NSUInteger DisableSessionSavingCount = 0;
 // = Legacy =
 // ==========
 
-- (void)updateVariables:(std::map<std::string, std::string>&)env
+- (std::map<std::string, std::string>)variables
 {
-	[self.fileBrowser updateVariables:env];
+	std::map<std::string, std::string> res;
+	if(self.fileBrowser)
+		res = [self.fileBrowser variables];
 
 	if(NSString* projectDir = self.projectPath)
 	{
-		env["TM_PROJECT_DIRECTORY"] = [projectDir fileSystemRepresentation];
-		env["TM_PROJECT_UUID"]      = to_s(self.identifier);
+		res["TM_PROJECT_DIRECTORY"] = [projectDir fileSystemRepresentation];
+		res["TM_PROJECT_UUID"]      = to_s(self.identifier);
 	}
 
-	if(auto theme = self.textView.theme)
-	{
-		if(auto themeItem = bundles::lookup(theme->uuid()))
-		{
-			if(!themeItem->paths().empty())
-				env["TM_CURRENT_THEME_PATH"] = themeItem->paths().back();
-		}
-	}
+	return res;
 }
 
 + (instancetype)controllerForDocument:(document::document_ptr const&)aDocument
@@ -2459,9 +2456,9 @@ static NSUInteger DisableSessionSavingCount = 0;
 			[controller openAndSelectDocument:document];
 		}
 
-		void run (bundle_command_t const& command, ng::buffer_t const& buffer, ng::ranges_t const& selection, document::document_ptr document, std::map<std::string, std::string> const& env, document::run_callback_ptr callback)
+		void run (bundle_command_t const& command, ng::buffer_t const& buffer, ng::ranges_t const& selection, document::document_ptr document, std::map<std::string, std::string> const& env, std::string const& pwd)
 		{
-			::run(command, buffer, selection, document, env, callback);
+			run_impl(command, buffer, selection, document, env, pwd);
 		}
 
 	} proxy;

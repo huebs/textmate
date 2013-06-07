@@ -79,8 +79,6 @@ struct buffer_refresh_callback_t;
 	// = Mouse Support =
 	// =================
 
-	NSCursor* ibeamCursor;
-
 	NSPoint mouseDownPos;
 	ng::index_t mouseDownIndex;
 	NSInteger mouseDownModifierFlags;
@@ -137,7 +135,7 @@ struct buffer_refresh_callback_t;
 - (NSImage*)imageForRanges:(ng::ranges_t const&)ranges imageRect:(NSRect*)outRect;
 - (void)highlightRanges:(ng::ranges_t const&)ranges;
 - (NSRange)nsRangeForRange:(ng::range_t const&)range;
-- (ng::range_t const&)rangeForNSRange:(NSRange)nsRange;
+- (ng::range_t)rangeForNSRange:(NSRange)nsRange;
 @property (nonatomic, readonly) ng::ranges_t const& markedRanges;
 @property (nonatomic) NSDate* optionDownDate;
 @property (nonatomic) OakTimer* initiateDragTimer;
@@ -454,6 +452,9 @@ static std::string shell_quote (std::vector<std::string> paths)
 		delete callback;
 		callback = NULL;
 
+		delete editor->delegate();
+		editor->set_delegate(NULL);
+
 		editor.reset();
 		layout.reset();
 
@@ -463,7 +464,7 @@ static std::string shell_quote (std::vector<std::string> paths)
 
 	if(document = aDocument)
 	{
-		settings_t const& settings = document->settings();
+		settings_t const settings = settings_for_path(document->virtual_path(), document->file_type() + " " + to_s(self.scopeAttributes), path::parent(document->path()));
 
 		editor = ng::editor_for_document(document);
 		wrapColumn = settings.get(kSettingsWrapColumnKey, wrapColumn);
@@ -475,6 +476,20 @@ static std::string shell_quote (std::vector<std::string> paths)
 		layout->set_is_key(hasFocus);
 
 		callback = new buffer_refresh_callback_t(self);
+
+		struct textview_delegate_t : ng::editor_delegate_t
+		{
+			textview_delegate_t (OakTextView* textView) : _self(textView) { }
+
+			std::map<std::string, std::string> variables_for_bundle_item (bundles::item_ptr item)
+			{
+				return [_self variablesForBundleItem:item];
+			}
+
+			OakTextView* _self;
+		};
+
+		editor->set_delegate(new textview_delegate_t(self));
 
 		editor->set_clipboard(get_clipboard(NSGeneralPboard));
 		editor->set_find_clipboard(get_clipboard(NSFindPboard));
@@ -526,6 +541,7 @@ static std::string shell_quote (std::vector<std::string> paths)
 		[self registerForDraggedTypes:[[self class] dropTypes]];
 
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(documentWillSave:) name:@"OakDocumentNotificationWillSave" object:nil];
+		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(documentDidSave:) name:@"OakDocumentNotificationDidSave" object:nil];
 		[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(userDefaultsDidChange:) name:NSUserDefaultsDidChangeNotification object:[NSUserDefaults standardUserDefaults]];
 	}
 	return self;
@@ -543,11 +559,21 @@ static std::string shell_quote (std::vector<std::string> paths)
 	if(window != self.window)
 		return;
 
-	citerate(item, bundles::query(bundles::kFieldSemanticClass, "callback.document.will-save", editor->scope(to_s([self scopeAttributes]))))
+	citerate(item, bundles::query(bundles::kFieldSemanticClass, "callback.document.will-save", [self scopeContext]))
 		[self performBundleItem:*item];
 
 	if(document && layout)
 		document->set_folded(layout->folded_as_string());
+}
+
+- (void)documentDidSave:(NSNotification*)aNotification
+{
+	NSWindow* window = [[aNotification userInfo] objectForKey:@"window"];
+	if(window != self.window)
+		return;
+
+	citerate(item, bundles::query(bundles::kFieldSemanticClass, "callback.document.did-save", [self scopeContext]))
+		[self performBundleItem:*item];
 }
 
 - (void)reflectDocumentSize
@@ -760,14 +786,13 @@ doScroll:
 	return NSMakeRange(location, length);
 }
 
-- (ng::range_t const&)rangeForNSRange:(NSRange)nsRange
+- (ng::range_t)rangeForNSRange:(NSRange)nsRange
 {
 	std::string const text = editor->as_string();
 	char const* base = text.data();
 	ng::index_t from = utf16::advance(base, nsRange.location, base + text.size()) - base;
 	ng::index_t to   = utf16::advance(base + from.index, nsRange.length, base + text.size()) - base;
-	static ng::range_t res;
-	return res = ng::range_t(from, to);
+	return ng::range_t(from, to);
 }
 
 - (void)setMarkedText:(id)aString selectedRange:(NSRange)aRange
@@ -994,7 +1019,7 @@ doScroll:
 	if(false) {
 	} HANDLE_ATTR(Value) {
 		AUTO_REFRESH;
-		document->buffer().replace(0, document->buffer().size(), to_s((NSString*)value));
+		document->set_content(to_s((NSString*)value));
 	} HANDLE_ATTR(SelectedText) {
 		AUTO_REFRESH;
 		editor->insert(to_s((NSString*)value));
@@ -1097,7 +1122,33 @@ doScroll:
 // = Bundle Items =
 // ================
 
-- (void)performBundleItem:(bundles::item_ptr const&)item
+- (std::map<std::string, std::string>)variablesForBundleItem:(bundles::item_ptr const&)item
+{
+	std::map<std::string, std::string> res = oak::basic_environment();
+	res << document->document_variables() << editor->editor_variables(to_s([self scopeAttributes]));
+	if(item)
+		res << item->bundle_variables();
+
+	if(auto themeItem = (theme ? bundles::lookup(theme->uuid()) : bundles::item_ptr()))
+	{
+		if(!themeItem->paths().empty())
+			res["TM_CURRENT_THEME_PATH"] = themeItem->paths().back();
+	}
+
+	if([self.delegate respondsToSelector:@selector(variables)])
+		res << [self.delegate variables];
+
+	res = bundles::scope_variables(res, [self scopeContext]);
+	res = variables_for_path(res, document->virtual_path(), [self scopeContext].right, path::parent(document->path()));
+	return res;
+}
+
+- (std::map<std::string, std::string>)variables
+{
+	return [self variablesForBundleItem:bundles::item_ptr()];
+}
+
+- (void)performBundleItem:(bundles::item_ptr)item
 {
 	// D(DBF_OakTextView_BundleItems, bug("%s\n", anItem->full_name().c_str()););
 	AUTO_REFRESH;
@@ -1106,7 +1157,7 @@ doScroll:
 		case bundles::kItemTypeSnippet:
 		{
 			[self recordSelector:@selector(insertSnippetWithOptions:) withArgument:ns::to_dictionary(item->plist())];
-			editor->snippet_dispatch(item->plist(), editor->variables(item->environment(), to_s([self scopeAttributes])));
+			editor->snippet_dispatch(item->plist(), [self variablesForBundleItem:item]);
 		}
 		break;
 
@@ -1121,14 +1172,14 @@ doScroll:
 					if(success)
 					{
 						AUTO_REFRESH;
-						document::run(command, document->buffer(), editor->ranges(), document);
+						document::run(command, document->buffer(), editor->ranges(), document, [self variablesForBundleItem:item]);
 					}
 				}];
 			}
 			else
 			{
 				command.pre_exec = pre_exec::nop;
-				document::run(command, document->buffer(), editor->ranges(), document);
+				document::run(command, document->buffer(), editor->ranges(), document, [self variablesForBundleItem:item]);
 			}
 		}
 		break;
@@ -1136,7 +1187,7 @@ doScroll:
 		case bundles::kItemTypeMacro:
 		{
 			[self recordSelector:@selector(playMacroWithOptions:) withArgument:ns::to_dictionary(item->plist())];
-			editor->macro_dispatch(item->plist(), editor->variables(item->environment(), to_s([self scopeAttributes])));
+			editor->macro_dispatch(item->plist(), [self variablesForBundleItem:item]);
 		}
 		break;
 
@@ -1151,13 +1202,13 @@ doScroll:
 
 - (void)applicationDidBecomeActiveNotification:(NSNotification*)aNotification
 {
-	citerate(item, bundles::query(bundles::kFieldSemanticClass, "callback.application.did-activate", editor->scope(to_s([self scopeAttributes]))))
+	citerate(item, bundles::query(bundles::kFieldSemanticClass, "callback.application.did-activate", [self scopeContext]))
 		[self performBundleItem:*item];
 }
 
 - (void)applicationDidResignActiveNotification:(NSNotification*)aNotification
 {
-	citerate(item, bundles::query(bundles::kFieldSemanticClass, "callback.application.did-deactivate", editor->scope(to_s([self scopeAttributes]))))
+	citerate(item, bundles::query(bundles::kFieldSemanticClass, "callback.application.did-deactivate", [self scopeContext]))
 		[self performBundleItem:*item];
 }
 
@@ -1323,7 +1374,7 @@ static void update_menu_key_equivalents (NSMenu* menu, action_to_key_t const& ac
 			return [self handleKeyBindingAction:pair->second], YES;
 	}
 
-	std::vector<bundles::item_ptr> const& items = bundles::query(bundles::kFieldKeyEquivalent, eventString, editor->scope(to_s([self scopeAttributes])));
+	std::vector<bundles::item_ptr> const& items = bundles::query(bundles::kFieldKeyEquivalent, eventString, [self scopeContext]);
 	if(!items.empty())
 	{
 		if(bundles::item_ptr item = OakShowMenuForBundleItems(items, [self positionForWindowUnderCaret]))
@@ -1381,7 +1432,7 @@ static void update_menu_key_equivalents (NSMenu* menu, action_to_key_t const& ac
 
 - (void)oldKeyDown:(NSEvent*)anEvent
 {
-	std::vector<bundles::item_ptr> const& items = bundles::query(bundles::kFieldKeyEquivalent, to_s(anEvent), editor->scope(to_s([self scopeAttributes])));
+	std::vector<bundles::item_ptr> const& items = bundles::query(bundles::kFieldKeyEquivalent, to_s(anEvent), [self scopeContext]);
 	if(bundles::item_ptr item = OakShowMenuForBundleItems(items, [self positionForWindowUnderCaret]))
 		[self performBundleItem:item];
 	else if(items.empty())
@@ -1997,7 +2048,7 @@ static void update_menu_key_equivalents (NSMenu* menu, action_to_key_t const& ac
 {
 	AUTO_REFRESH;
 	[self recordSelector:_cmd withArgument:someOptions];
-	editor->snippet_dispatch(plist::convert((__bridge CFDictionaryRef)someOptions), editor->variables(std::map<std::string, std::string>(), to_s([self scopeAttributes])));
+	editor->snippet_dispatch(plist::convert((__bridge CFDictionaryRef)someOptions), [self variables]);
 }
 
 - (void)undo:(id)anArgument // MACRO?
@@ -2180,7 +2231,7 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 
 - (BOOL)continuousIndentCorrections
 {
-	return !plist::is_true(bundles::value_for_setting("disableIndentCorrections", editor->scope(to_s([self scopeAttributes]))));
+	return !plist::is_true(bundles::value_for_setting("disableIndentCorrections", [self scopeContext]));
 }
 
 - (void)setTheme:(theme_ptr const&)newTheme
@@ -2339,10 +2390,9 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 	[self setNeedsDisplay:YES];
 }
 
-- (scope::context_t const&)scopeContext
+- (scope::context_t)scopeContext
 {
-	static scope::context_t res;
-	return res = editor->scope(to_s([self scopeAttributes]));
+	return editor->scope(to_s([self scopeAttributes]));
 }
 
 - (NSString*)scopeAsString // Used by https://github.com/emmetio/Emmet.tmplugin
@@ -2420,29 +2470,27 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 	return kFoldingNone;
 }
 
-- (GVLineRecord const&)lineRecordForPosition:(CGFloat)yPos
+- (GVLineRecord)lineRecordForPosition:(CGFloat)yPos
 {
-	static GVLineRecord res;
 	if(!layout)
-		return res = GVLineRecord();
+		return GVLineRecord();
 	auto record = layout->line_record_for(yPos);
-	return res = GVLineRecord(record.line, record.softline, record.top, record.bottom, record.baseline);
+	return GVLineRecord(record.line, record.softline, record.top, record.bottom, record.baseline);
 }
 
-- (GVLineRecord const&)lineFragmentForLine:(NSUInteger)aLine column:(NSUInteger)aColumn
+- (GVLineRecord)lineFragmentForLine:(NSUInteger)aLine column:(NSUInteger)aColumn
 {
-	static GVLineRecord res;
 	if(!layout)
-		return res = GVLineRecord();
+		return GVLineRecord();
 	auto record = layout->line_record_for(text::pos_t(aLine, aColumn));
-	return res = GVLineRecord(record.line, record.softline, record.top, record.bottom, record.baseline);
+	return GVLineRecord(record.line, record.softline, record.top, record.bottom, record.baseline);
 }
 
 - (BOOL)filterDocumentThroughCommand:(NSString*)commandString input:(input::type)inputUnit output:(output::type)outputUnit
 {
 	BOOL res = NO;
 
-	auto environment = editor->variables(std::map<std::string, std::string>(), to_s([self scopeAttributes]));
+	auto environment = [self variables];
 	if(io::process_t process = io::spawn(std::vector<std::string>{ "/bin/sh", "-c", to_s(commandString) }, environment))
 	{
 		bool inputWasSelection = false;
@@ -2524,7 +2572,7 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 	D(DBF_OakTextView_Macros, bug("%s\n", to_s(plist::convert((__bridge CFDictionaryRef)[[NSUserDefaults standardUserDefaults] arrayForKey:@"OakMacroManagerScratchMacro"])).c_str()););
 	AUTO_REFRESH;
 	if(NSArray* scratchMacro = [[NSUserDefaults standardUserDefaults] arrayForKey:@"OakMacroManagerScratchMacro"])
-			editor->macro_dispatch(plist::convert((__bridge CFDictionaryRef)@{ @"commands" : scratchMacro }), editor->variables(std::map<std::string, std::string>(), to_s([self scopeAttributes])));
+			editor->macro_dispatch(plist::convert((__bridge CFDictionaryRef)@{ @"commands" : scratchMacro }), [self variables]);
 	else	NSBeep();
 }
 
@@ -2585,7 +2633,7 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 	std::set<bundles::item_ptr> allHandlers;
 	std::map<oak::uuid_t, std::vector<std::string> > handlerToFiles;
 
-	scope::context_t scope = editor->scope(to_s([self scopeAttributes]));
+	scope::context_t scope = [self scopeContext];
 	for(NSString* path in someFiles)
 	{
 		citerate(item, bundles::drag_commands_for_path(to_s(path), scope))
@@ -2623,34 +2671,6 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 	}
 	else if(bundles::item_ptr handler = OakShowMenuForBundleItems(std::vector<bundles::item_ptr>(allHandlers.begin(), allHandlers.end()), [self positionForWindowUnderCaret]))
 	{
-		struct callback_t : document::run_callback_t
-		{
-			callback_t (std::vector<std::string> const& paths, std::string const& modifierFlags) : _paths(paths), _modifier_flags(modifierFlags) { }
-
-			void update_environment (std::map<std::string, std::string>& env)
-			{
-				env["PWD"] = format_string::expand("${TM_DIRECTORY:-${TM_PROJECT_DIRECTORY:-$TMPDIR}}", env);
-				env["TM_MODIFIER_FLAGS"] = _modifier_flags;
-
-				std::vector<std::string> files;
-				iterate(path, _paths)
-					files.push_back(path::relative_to(*path, env["PWD"]));
-
-				env["TM_DROPPED_FILE"]     = files.front();
-				env["TM_DROPPED_FILEPATH"] = _paths.front();
-
-				if(files.size() > 1)
-				{
-					env["TM_DROPPED_FILES"]     = shell_quote(files);
-					env["TM_DROPPED_FILEPATHS"] = shell_quote(_paths);
-				}
-			}
-
-		private:
-			std::vector<std::string> _paths;
-			std::string _modifier_flags;
-		};
-
 		D(DBF_OakTextView_DragNDrop, bug("execute %s\n", handler->full_name().c_str()););
 
 		static struct { NSUInteger qual; std::string name; } const qualNames[] =
@@ -2661,6 +2681,21 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 			{ NSCommandKeyMask,   "COMMAND"  }
 		};
 
+		auto env = [self variablesForBundleItem:handler];
+		auto const pwd = format_string::expand("${TM_DIRECTORY:-${TM_PROJECT_DIRECTORY:-$TMPDIR}}", env);
+
+		std::vector<std::string> files, paths = handlerToFiles[handler->uuid()];
+		std::transform(paths.begin(), paths.end(), back_inserter(files), [&pwd](std::string const& path){ return path::relative_to(path, pwd); });
+
+		env["TM_DROPPED_FILE"]     = files.front();
+		env["TM_DROPPED_FILEPATH"] = paths.front();
+
+		if(files.size() > 1)
+		{
+			env["TM_DROPPED_FILES"]     = shell_quote(files);
+			env["TM_DROPPED_FILEPATHS"] = shell_quote(paths);
+		}
+
 		NSUInteger state = [NSEvent modifierFlags];
 		std::vector<std::string> flagNames;
 		for(size_t i = 0; i != sizeofA(qualNames); ++i)
@@ -2668,9 +2703,10 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 			if(state & qualNames[i].qual)
 				flagNames.push_back(qualNames[i].name);
 		}
+		env["TM_MODIFIER_FLAGS"] = text::join(flagNames, "|");
 
 		AUTO_REFRESH;
-		document::run(parse_drag_command(handler), document->buffer(), editor->ranges(), document, std::map<std::string, std::string>(), document::run_callback_ptr((document::run_callback_t*)new callback_t(handlerToFiles[handler->uuid()], text::join(flagNames, "|"))));
+		document::run(parse_drag_command(handler), document->buffer(), editor->ranges(), document, env, pwd);
 	}
 }
 
@@ -2798,16 +2834,11 @@ static char const* kOakMenuItemTitle = "OakMenuItemTitle";
 // = Cursor Support =
 // ==================
 
-- (NSCursor*)ibeamCursor
-{
-	return ibeamCursor;
-}
-
 - (void)setIbeamCursor:(NSCursor*)aCursor
 {
-	if(ibeamCursor != aCursor)
+	if(_ibeamCursor != aCursor)
 	{
-		ibeamCursor = aCursor;
+		_ibeamCursor = aCursor;
 		[[self window] invalidateCursorRectsForView:self];
 	}
 }

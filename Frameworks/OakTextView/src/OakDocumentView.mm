@@ -1,4 +1,5 @@
 #import "OakDocumentView.h"
+#import "GutterView.h"
 #import "OTVStatusBar.h"
 #import <document/document.h>
 #import <file/type.h>
@@ -33,7 +34,31 @@ static NSString* const kFoldingsColumnIdentifier  = @"foldings";
 }
 @end
 
-@interface OakDocumentView () <OTVStatusBarDelegate>
+@interface OakDocumentView () <GutterViewDelegate, GutterViewColumnDataSource, GutterViewColumnDelegate, OTVStatusBarDelegate>
+{
+	OBJC_WATCH_LEAKS(OakDocumentView);
+
+	NSScrollView* gutterScrollView;
+	GutterView* gutterView;
+	NSColor* gutterDividerColor;
+	NSDictionary* gutterImages;
+	NSDictionary* gutterHoverImages;
+	NSDictionary* gutterPressedImages;
+
+	NSBox* gutterDividerView;
+	NSBox* statusDividerView;
+
+	NSScrollView* textScrollView;
+	OakTextView* textView;
+	OTVStatusBar* statusBar;
+	document::document_ptr document;
+	document::document_t::callback_t* callback;
+
+	NSMutableArray* topAuxiliaryViews;
+	NSMutableArray* bottomAuxiliaryViews;
+
+	IBOutlet NSPanel* tabSizeSelectorPanel;
+}
 @property (nonatomic, readonly) OTVStatusBar* statusBar;
 @property (nonatomic, retain) NSDictionary* gutterImages;
 @property (nonatomic, retain) NSDictionary* gutterHoverImages;
@@ -509,10 +534,7 @@ private:
 - (void)takeGrammarUUIDFrom:(id)sender
 {
 	if(bundles::item_ptr item = bundles::lookup(to_s((NSString*)[sender representedObject])))
-	{
-		document->set_file_type(item->value_for_field(bundles::kFieldGrammarScope));
-		file::set_type(document->virtual_path(), item->value_for_field(bundles::kFieldGrammarScope));
-	}
+		[textView performBundleItem:item];
 }
 
 - (void)goToSymbol:(id)sender
@@ -654,8 +676,8 @@ private:
 // = GutterView Delegate Proxy =
 // =============================
 
-- (GVLineRecord const&)lineRecordForPosition:(CGFloat)yPos                              { return [textView lineRecordForPosition:yPos];               }
-- (GVLineRecord const&)lineFragmentForLine:(NSUInteger)aLine column:(NSUInteger)aColumn { return [textView lineFragmentForLine:aLine column:aColumn]; }
+- (GVLineRecord)lineRecordForPosition:(CGFloat)yPos                              { return [textView lineRecordForPosition:yPos];               }
+- (GVLineRecord)lineFragmentForLine:(NSUInteger)aLine column:(NSUInteger)aColumn { return [textView lineFragmentForLine:aLine column:aColumn]; }
 
 // =========================
 // = GutterView DataSource =

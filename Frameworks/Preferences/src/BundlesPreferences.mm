@@ -134,6 +134,8 @@ static std::string textify (std::string str)
 		std::sort(bundles.begin(), bundles.end(), [](bundles_db::bundle_ptr lhs, bundles_db::bundle_ptr rhs){ return (rhs.get()->installed() ? rhs.get()->path_updated() : rhs.get()->url_updated()) < (lhs.get()->installed() ? lhs.get()->path_updated() : lhs.get()->url_updated()); });
 	else if([[aTableColumn identifier] isEqualToString:@"description"])
 		std::sort(bundles.begin(), bundles.end(), [&lessThan](bundles_db::bundle_ptr lhs, bundles_db::bundle_ptr rhs){ return lessThan(textify(lhs.get()->description()), textify(rhs.get()->description())); });
+	else
+		return;
 
 	BOOL sortDescending = [aTableView indicatorImageInTableColumn:aTableColumn] == [NSImage imageNamed:@"NSAscendingSortIndicator"];
 	if(sortDescending)
@@ -156,9 +158,10 @@ static std::string textify (std::string str)
 	return NO;
 }
 
-- (BOOL)tableView:(NSTableView*)aTableView shouldSelectRow:(int)anInt
+- (BOOL)tableView:(NSTableView*)aTableView shouldSelectRow:(NSInteger)rowIndex
 {
-	return [aTableView clickedColumn] != 0;
+	NSInteger clickedColumn = [aTableView clickedColumn];
+	return clickedColumn != [aTableView columnWithIdentifier:@"installed"] && clickedColumn != [aTableView columnWithIdentifier:@"link"];
 }
 
 // ==========================
@@ -202,5 +205,13 @@ static std::string textify (std::string str)
 				[_bundlesManager installBundle:bundle completionHandler:nil];
 		else	[_bundlesManager uninstallBundle:bundle];
 	}
+}
+
+- (IBAction)didClickBundleLink:(NSTableView*)aTableView
+{
+	NSInteger rowIndex = [aTableView clickedRow];
+	bundles_db::bundle_ptr bundle = bundles[rowIndex];
+	if(bundle->html_url() != NULL_STR)
+		[[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:[NSString stringWithCxxString:bundle->html_url()]]];
 }
 @end

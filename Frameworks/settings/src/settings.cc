@@ -31,20 +31,6 @@ namespace
 	static std::vector< std::pair<std::string, std::string> > global_variables ()
 	{
 		std::vector< std::pair<std::string, std::string> > res;
-
-		static char const* const preserve[] = { "DIALOG", "DIALOG_1", "DIALOG_PORT_NAME", "DIALOG_1_PORT_NAME" };
-		iterate(key, preserve)
-		{
-			if(char const* value = getenv(*key))
-				res.push_back(std::make_pair(*key, value));
-		}
-
-		res.push_back(std::make_pair("TM_PID", std::to_string(getpid())));
-		res.push_back(std::make_pair("TM_FULLNAME", path::passwd_entry()->pw_gecos ?: "John Doe"));
-		res.push_back(std::make_pair("TM_APP_IDENTIFIER", cf::to_s(CFBundleGetIdentifier(CFBundleGetMainBundle()))));
-		citerate(pair, oak::basic_environment())
-			res.push_back(*pair);
-
 		if(CFPropertyListRef cfPlist = CFPreferencesCopyAppValue(CFSTR("environmentVariables"), kCFPreferencesCurrentApplication))
 		{
 			if(CFGetTypeID(cfPlist) == CFArrayGetTypeID())
@@ -225,12 +211,14 @@ void settings_t::set_global_settings_path (std::string const& path)
 
 settings_t settings_for_path (std::string const& path, scope::scope_t const& scope, std::string const& directory, std::map<std::string, std::string> variables)
 {
+	for(auto pair : oak::basic_environment())
+		variables.insert(pair);
 	return expanded_variables_for(directory != NULL_STR ? directory : (path != NULL_STR ? path::parent(path) : path::home()), path, scope, variables);
 }
 
-std::map<std::string, std::string> variables_for_path (std::string const& path, scope::scope_t const& scope, std::map<std::string, std::string> variables)
+std::map<std::string, std::string> variables_for_path (std::map<std::string, std::string> const& base, std::string const& path, scope::scope_t const& scope, std::string const& directory)
 {
-	variables = expanded_variables_for(path == NULL_STR ? path::home() : path::parent(path), path, scope, variables);
+	auto variables = expanded_variables_for(directory != NULL_STR ? directory : (path != NULL_STR ? path::parent(path) : path::home()), path, scope, base);
 
 	auto it = variables.begin();
 	while(it != variables.end())

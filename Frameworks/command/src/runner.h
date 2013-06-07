@@ -2,10 +2,10 @@
 #define COMMAND_RUNNER_H_MW7OSOTP
 
 #include "parser.h"
+#include "process.h"
+#include "reader.h"
 #include <buffer/buffer.h>
 #include <selection/selection.h>
-#include <OakSystem/process.h>
-#include <OakSystem/reader.h>
 #include <text/types.h>
 #include <oak/debug.h>
 #include <oak/callbacks.h>
@@ -23,8 +23,6 @@ namespace command
 	struct PUBLIC delegate_t : std::enable_shared_from_this<delegate_t>
 	{
 		virtual ~delegate_t () { }
-
-		virtual void update_environment (std::map<std::string, std::string>& env) { }
 
 		virtual text::range_t write_unit_to_fd (int fd, input::type unit, input::type fallbackUnit, input_format::type format, scope::selector_t const& scopeSelector, std::map<std::string, std::string>& variables, bool* inputWasSelection) = 0;
 
@@ -46,11 +44,11 @@ namespace command
 		virtual void done (runner_ptr runner)                                 { }
 	};
 
-	PUBLIC runner_ptr runner (bundle_command_t const& command, ng::buffer_t const& buffer, ng::ranges_t const& selection, std::map<std::string, std::string> const& environment, delegate_ptr delegate);
+	PUBLIC runner_ptr runner (bundle_command_t const& command, ng::buffer_t const& buffer, ng::ranges_t const& selection, std::map<std::string, std::string> const& environment, delegate_ptr delegate, std::string const& pwd = NULL_STR);
 
 	struct PUBLIC runner_t : std::enable_shared_from_this<runner_t>
 	{
-		friend runner_ptr runner (bundle_command_t const& command, ng::buffer_t const& buffer, ng::ranges_t const& selection, std::map<std::string, std::string> const& environment, delegate_ptr delegate);
+		friend runner_ptr runner (bundle_command_t const& command, ng::buffer_t const& buffer, ng::ranges_t const& selection, std::map<std::string, std::string> const& environment, delegate_ptr delegate, std::string const& pwd);
 		runner_t () = delete;
 
 		void launch ();
@@ -67,9 +65,9 @@ namespace command
 		std::map<std::string, std::string> const& environment () const { return _environment; }
 
 	private:
-		runner_t (bundle_command_t const& command, ng::buffer_t const& buffer, ng::ranges_t const& selection, std::map<std::string, std::string> const& environment, delegate_ptr delegate);
+		runner_t (bundle_command_t const& command, ng::buffer_t const& buffer, ng::ranges_t const& selection, std::map<std::string, std::string> const& environment, std::string const& pwd, delegate_ptr delegate);
 
-		struct PUBLIC my_process_t : oak::process_t
+		struct my_process_t : process_t
 		{
 			WATCH_LEAKS(my_process_t);
 
@@ -79,11 +77,11 @@ namespace command
 			runner_t* _callback;
 		};
 
-		struct my_reader_t : io::reader_t
+		struct my_reader_t : reader_t
 		{
 			WATCH_LEAKS(my_reader_t);
 
-			my_reader_t (int fd, runner_ptr callback, bool is_error) : io::reader_t(fd), _callback(callback), _is_error(is_error) { }
+			my_reader_t (int fd, runner_ptr callback, bool is_error) : reader_t(fd), _callback(callback), _is_error(is_error) { }
 			void receive_data (char const* bytes, size_t len);
 		private:
 			runner_ptr _callback;
@@ -105,6 +103,7 @@ namespace command
 
 		bundle_command_t _command;
 		std::map<std::string, std::string> _environment;
+		std::string _directory;
 		delegate_ptr _delegate;
 
 		text::range_t _input_range;   // used when output replaces input
