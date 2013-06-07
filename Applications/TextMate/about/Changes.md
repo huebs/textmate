@@ -1170,4 +1170,3 @@ Notable changes since to TextMate 1.5.10:
 
 	Display of CJK and “advanced” input modes is now be supported (although only limited testing has been done).
 
-
