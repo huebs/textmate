@@ -32,6 +32,7 @@
 
 namespace find_tags { enum { in_document = 1, in_selection, in_project, in_folder }; } // From AppController.h
 
+static NSString* const kUserDefaultsFindInSelectionByDefault = @"findInSelectionByDefault";
 static NSString* const OakDocumentPboardType = @"OakDocumentPboardType"; // drag’n’drop of tabs
 static BOOL IsInShouldTerminateEventLoop = NO;
 
@@ -1777,12 +1778,13 @@ namespace
 - (IBAction)orderFrontFindPanel:(id)sender
 {
 	Find* find              = [Find sharedInstance];
+	BOOL didOwnDialog       = [find.projectIdentifier isEqualToString:self.identifier];
 	find.documentIdentifier = self.selectedDocumentUUID;
 	find.projectFolder      = self.projectPath ?: self.untitledSavePath ?: NSHomeDirectory();
 	find.projectIdentifier  = self.identifier;
 
 	NSInteger mode = [sender respondsToSelector:@selector(tag)] ? [sender tag] : find_tags::in_document;
-	if(mode == find_tags::in_document && [self.window isKeyWindow] && self.textView.hasMultiLineSelection)
+	if(mode == find_tags::in_document && [[NSUserDefaults standardUserDefaults] boolForKey:kUserDefaultsFindInSelectionByDefault] && [self.window isKeyWindow] && self.textView.hasMultiLineSelection)
 		mode = find_tags::in_selection;
 
 	switch(mode)
@@ -1795,7 +1797,7 @@ namespace
 		{
 			BOOL fileBrowserHasFocus = [self.window.firstResponder respondsToSelector:@selector(isDescendantOf:)] && [(NSView*)self.window.firstResponder isDescendantOf:self.fileBrowser.view];
 			NSString* searchFolder = fileBrowserHasFocus ? self.untitledSavePath : find.projectFolder;
-			if(find.isVisible && find.searchFolder)
+			if(find.isVisible && find.searchFolder && didOwnDialog) // don’t reset search folder, as the user may have picked “Other…” and simply wants the results brought to front
 				searchFolder = find.searchFolder;
 			[find showFindWindowFor:searchFolder];
 		}
@@ -2279,7 +2281,7 @@ static NSUInteger DisableSessionSavingCount = 0;
 		{
 			if([NSApp isHidden])
 			{
-				__block id observerId = [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidUnhideNotification object:NSApp queue:nil usingBlock:^(NSNotification*){
+				__weak __block id observerId = [[NSNotificationCenter defaultCenter] addObserverForName:NSApplicationDidUnhideNotification object:NSApp queue:nil usingBlock:^(NSNotification*){
 					[aController showWindow:nil];
 					SetFrontProcessWithOptions(&(ProcessSerialNumber){ 0, kCurrentProcess }, kSetFrontProcessFrontWindowOnly);
 					[[NSNotificationCenter defaultCenter] removeObserver:observerId];

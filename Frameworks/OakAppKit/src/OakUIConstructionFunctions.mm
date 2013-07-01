@@ -15,6 +15,7 @@ NSTextField* OakCreateLabel (NSString* label)
 {
 	NSTextField* res = [[NSTextField alloc] initWithFrame:NSZeroRect];
 	[[res cell] setWraps:NO];
+	res.alignment       = NSRightTextAlignment;
 	res.bezeled         = NO;
 	res.bordered        = NO;
 	res.drawsBackground = NO;
@@ -28,7 +29,18 @@ NSTextField* OakCreateLabel (NSString* label)
 NSTextField* OakCreateSmallLabel (NSString* label)
 {
 	NSTextField* res = OakCreateLabel(label);
-	res.font = [NSFont controlContentFontOfSize:[NSFont smallSystemFontSize]];
+	res.alignment = NSLeftTextAlignment;
+	res.font      = [NSFont controlContentFontOfSize:[NSFont smallSystemFontSize]];
+	return res;
+}
+
+NSButton* OakCreateCheckBox (NSString* label)
+{
+	NSButton* res = [[NSButton alloc] initWithFrame:NSZeroRect];
+	[res setContentHuggingPriority:NSLayoutPriorityDefaultHigh forOrientation:NSLayoutConstraintOrientationVertical];
+	res.buttonType = NSSwitchButton;
+	res.font       = OakControlFont();
+	res.title      = label;
 	return res;
 }
 

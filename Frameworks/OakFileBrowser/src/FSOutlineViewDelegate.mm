@@ -122,11 +122,6 @@ static NSSet* VisibleItems (NSOutlineView* outlineView, FSItem* root, NSMutableS
 @implementation FSOutlineViewDelegate
 @synthesize outlineView, dataSource, openURLs, modifiedURLs, pendingSelectURLs, pendingEditURL, pendingMakeVisibleURL, pendingExpandURLs, pendingScrollOffset;
 
-+ (void)initialize
-{
-	[[NSUserDefaults standardUserDefaults] removeObjectForKey:@"SelectedURLs"];
-}
-
 - (id)init
 {
 	if((self = [super init]))
@@ -151,8 +146,14 @@ static NSSet* VisibleItems (NSOutlineView* outlineView, FSItem* root, NSMutableS
 
 - (void)applicationWillTerminate:(NSNotification*)aNotification
 {
+	static BOOL mergeWithUserDefaults = NO;
+	[expandedURLs intersectSet:VisibleURLs(outlineView, dataSource.rootItem)];
+	if(mergeWithUserDefaults)
+		[expandedURLs unionSet:ConvertURLArrayToStringSet([[NSUserDefaults standardUserDefaults] arrayForKey:@"ExpandedURLs"])];
+
 	Snapshot(outlineView, dataSource.rootItem, expandedURLs, selectedURLs);
 	[[NSUserDefaults standardUserDefaults] setObject:ConvertURLSetToStringArray(expandedURLs) forKey:@"ExpandedURLs"];
+	mergeWithUserDefaults = YES;
 }
 
 - (void)setOutlineView:(NSOutlineView*)anOutlineView

@@ -25,6 +25,7 @@
 #import <network/tbz.h>
 #import <ns/ns.h>
 #import <oak/debug.h>
+#import <oak/compat.h>
 #import <oak/oak.h>
 #import <scm/scm.h>
 #import <text/types.h>
@@ -159,8 +160,8 @@ BOOL HasDocumentWindow (NSArray* windows)
 	{
 		NSInteger daysUntilExpiration = floor([expirationDate timeIntervalSinceNow] / kSecondsPerDay);
 		NSInteger weeksSinceCompilation = floor(-[compileDate timeIntervalSinceNow] / kSecondsPerDay / 7);
-		NSInteger choice = NSRunAlertPanel(@"TextMate is Outdated!", @"You are using a preview of TextMate 2 which is more than %ld weeks old. It will stop working in %ld day%s.", @"Visit Website", @"Cancel", nil, weeksSinceCompilation, daysUntilExpiration, daysUntilExpiration == 1 ? "" : "s");
-		if(choice == NSAlertDefaultReturn) // "Visit Website"
+		NSInteger choice = NSRunAlertPanel(@"TextMate is Outdated!", @"This version of TextMate is more than %ld weeks old and you should update to latest version. You can continue to use this version for another %ld day%s.", @"Continue", @"Visit Download Page", nil, weeksSinceCompilation, daysUntilExpiration, daysUntilExpiration == 1 ? "" : "s");
+		if(choice == NSAlertAlternateReturn) // "Visit Website"
 			[[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:@"https://macromates.com/download"]];
 	}
 	[NSTimer scheduledTimerWithTimeInterval:kSecondsPerDay target:self selector:@selector(checkExpirationDate:) userInfo:nil repeats:NO];
@@ -177,6 +178,7 @@ BOOL HasDocumentWindow (NSArray* windows)
 	[[NSUserDefaults standardUserDefaults] registerDefaults:@{
 		@"ApplePressAndHoldEnabled" : @NO,
 		@"NSRecentDocumentsLimit"   : @25,
+		@"WebKitDeveloperExtras"    : @YES,
 	}];
 	RegisterDefaults();
 
@@ -248,12 +250,13 @@ BOOL HasDocumentWindow (NSArray* windows)
 		[self newDocument:self];
 
 	SoftwareUpdate* swUpdate = [SoftwareUpdate sharedInstance];
+	NSString* parms = [NSString stringWithFormat:@"v=%@&os=%zu.%zu.%zu", [[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding], oak::os_major(), oak::os_minor(), oak::os_patch()];
 	[swUpdate setSignee:key_chain_t::key_t("org.textmate.duff", "Allan Odgaard", "-----BEGIN PUBLIC KEY-----\nMIIBtjCCASsGByqGSM44BAEwggEeAoGBAPIE9PpXPK3y2eBDJ0dnR/D8xR1TiT9m\n8DnPXYqkxwlqmjSShmJEmxYycnbliv2JpojYF4ikBUPJPuerlZfOvUBC99ERAgz7\nN1HYHfzFIxVo1oTKWurFJ1OOOsfg8AQDBDHnKpS1VnwVoDuvO05gK8jjQs9E5LcH\ne/opThzSrI7/AhUAy02E9H7EOwRyRNLofdtPxpa10o0CgYBKDfcBscidAoH4pkHR\nIOEGTCYl3G2Pd1yrblCp0nCCUEBCnvmrWVSXUTVa2/AyOZUTN9uZSC/Kq9XYgqwj\nhgzqa8h/a8yD+ao4q8WovwGeb6Iso3WlPl8waz6EAPR/nlUTnJ4jzr9t6iSH9owS\nvAmWrgeboia0CI2AH++liCDvigOBhAACgYAFWO66xFvmF2tVIB+4E7CwhrSi2uIk\ndeBrpmNcZZ+AVFy1RXJelNe/cZ1aXBYskn/57xigklpkfHR6DGqpEbm6KC/47Jfy\ny5GEx+F/eBWEePi90XnLinytjmXRmS2FNqX6D15XNG1xJfjociA8bzC7s4gfeTUd\nlpQkBq2z71yitA==\n-----END PUBLIC KEY-----\n")];
-	[swUpdate setChannels:[NSDictionary dictionaryWithObjectsAndKeys:
-		[NSURL URLWithString:REST_API @"/releases/release"],  kSoftwareUpdateChannelRelease,
-		[NSURL URLWithString:REST_API @"/releases/beta"],     kSoftwareUpdateChannelBeta,
-		[NSURL URLWithString:REST_API @"/releases/nightly"],  kSoftwareUpdateChannelNightly,
-		nil]];
+	[swUpdate setChannels:@{
+		kSoftwareUpdateChannelRelease : [NSURL URLWithString:[NSString stringWithFormat:REST_API @"/releases/release?%@", parms]],
+		kSoftwareUpdateChannelBeta    : [NSURL URLWithString:[NSString stringWithFormat:REST_API @"/releases/beta?%@", parms]],
+		kSoftwareUpdateChannelNightly : [NSURL URLWithString:[NSString stringWithFormat:REST_API @"/releases/nightly?%@", parms]],
+	}];
 
 	[self userDefaultsDidChange:nil]; // setup mate/rmate server
 	[[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(userDefaultsDidChange:) name:NSUserDefaultsDidChangeNotification object:[NSUserDefaults standardUserDefaults]];
@@ -261,6 +264,9 @@ BOOL HasDocumentWindow (NSArray* windows)
 	bundlesMenu.delegate  = self;
 	themesMenu.delegate   = self;
 	spellingMenu.delegate = self;
+
+	NSMenu* selectMenu = [[[[[NSApp mainMenu] itemWithTitle:@"Edit"] submenu] itemWithTitle:@"Select"] submenu];
+	[[selectMenu itemWithTitle:@"Toggle Column Selection"] setActivationString:@"⌥" withFont:nil];
 
 	[TerminalPreferences updateMateIfRequired];
 	[AboutWindowController showChangesIfUpdated];
@@ -462,6 +468,11 @@ BOOL HasDocumentWindow (NSArray* windows)
 				[item updateTitle:[NSString stringWithCxxString:name_with_selection(bundleItem, [textView hasSelection])]];
 		}
 	}
+	else if([item action] == @selector(printDocument:))
+	{
+		NSView* webView = [NSApp targetForAction:@selector(print:)];
+		enabled = [webView isKindOfClass:[NSView class]] && [webView conformsToProtocol:@protocol(WebDocumentView)];
+	}
 	return enabled;
 }
 
@@ -479,5 +490,34 @@ BOOL HasDocumentWindow (NSArray* windows)
 - (void)editBundleItemWithUUIDString:(NSString*)uuidString
 {
 	[[BundleEditor sharedInstance] revealBundleItem:bundles::lookup(to_s(uuidString))];
+}
+
+// ============
+// = Printing =
+// ============
+
+- (IBAction)runPageLayout:(id)sender
+{
+	[[NSPageLayout pageLayout] runModal];
+}
+
+- (void)printDocument:(id)sender
+{
+	NSView* webView = [NSApp targetForAction:@selector(print:)];
+	if([webView isKindOfClass:[NSView class]] && [webView conformsToProtocol:@protocol(WebDocumentView)])
+	{
+		NSPrintOperation* printer = [NSPrintOperation printOperationWithView:webView];
+		[[printer printPanel] setOptions:[[printer printPanel] options] | NSPrintPanelShowsPaperSize | NSPrintPanelShowsOrientation];
+
+		NSPrintInfo* info = [printer printInfo];
+
+		NSRect display = NSIntersectionRect(info.imageablePageBounds, (NSRect){ NSZeroPoint, info.paperSize });
+		info.leftMargin   = NSMinX(display);
+		info.rightMargin  = info.paperSize.width - NSMaxX(display);
+		info.topMargin    = info.paperSize.height - NSMaxY(display);
+		info.bottomMargin = NSMinY(display);
+
+		[printer runOperationModalForWindow:[webView window] delegate:nil didRunSelector:NULL contextInfo:nil];
+	}
 }
 @end

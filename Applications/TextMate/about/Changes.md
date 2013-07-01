@@ -1,6 +1,28 @@
 # Changes
 
+<<<<<<< HEAD
 ## 2013-05-18 ([a9425](https://github.com/textmate/textmate/compare/a9423...a9425))
+=======
+## 2013-06-24 ([a9437](https://github.com/textmate/textmate/compare/a9435...a9437))
+
+* With the find dialog showing for a document, it is now possible to use ⌥⌘F to activate “Find All”. Be aware that Edit → Find → Find All without the dialog showing is really “select all matches” (possibly limited to a selection).
+* To aid in discovery, I’ve added Edit → Select → Toggle Column Selection which shows just the option modifier key (⌥) as key equivalent, since a single-tap of option is how you switch from stream selection to column selection. This is the same as TextMate 1.x, but many still seem unfamiliar with just how easy it is to create column selections with TextMate, and subsequently, break it into multiple carets. For the latter there now is a [short screencast](http://www.youtube.com/watch?v=Jqc5EdZmpmQ "YouTube » Multiple Carets with TextMate 2") in addition to the [blog post about multiple carets](http://blog.macromates.com/2011/multiple-carets/ "TextMate Blog » Multiple Carets").
+
+## 2013-06-21 ([a9435](https://github.com/textmate/textmate/compare/a9433...a9435))
+
+* You can now [add your TextMate (1.x) license](javascript:TextMate.addLicense()) in About → Registration.
+* Using arrow up/down with multiple carets all on same line will no longer leave the multiple carets editing mode. Instead use ⌘←/⌘→ or ⌃A/⌃E to move all carets to the beginning or end of the line (which collapses them into a single caret).
+* Previously using ⌘F with a multiline selection would automatically set the “in” pop-up to “selection”. This is no longer the case, but can be brought back by running: `defaults write findInSelectionByDefault -bool YES`
+* Miscellaneous fixes.
+
+## 2013-06-15 ([a9433](https://github.com/textmate/textmate/compare/a9427...a9433))
+
+* Don't add files from find window to recent list. *[Jakub Suder]*
+* Enable "Inspect Element" in web preview. *[Zete Lui]*
+* Miscellaneous fixes.
+
+## 2013-05-26 ([a9427](https://github.com/textmate/textmate/compare/a9423...a9427))
+>>>>>>> upstream/master
 
 * Add missing variables (like `PATH`) for export commands.
 

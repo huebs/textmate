@@ -124,12 +124,13 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 	self.windowController.replaceAllButton.enabled = replaceAllEnabled;
 }
 
-- (IBAction)countOccurrences:(id)sender { [self performFindAction:FindActionCountMatches   withWindowController:self.windowController]; }
-- (IBAction)findAll:(id)sender          { [self performFindAction:FindActionFindAll        withWindowController:self.windowController]; }
-- (IBAction)findNext:(id)sender         { [self performFindAction:FindActionFindNext       withWindowController:self.windowController]; }
-- (IBAction)findPrevious:(id)sender     { [self performFindAction:FindActionFindPrevious   withWindowController:self.windowController]; }
-- (IBAction)replaceAll:(id)sender       { [self performFindAction:FindActionReplaceAll     withWindowController:self.windowController]; }
-- (IBAction)replaceAndFind:(id)sender   { [self performFindAction:FindActionReplaceAndFind withWindowController:self.windowController]; }
+- (IBAction)countOccurrences:(id)sender   { [self performFindAction:FindActionCountMatches   withWindowController:self.windowController]; }
+- (IBAction)findAll:(id)sender            { [self performFindAction:FindActionFindAll        withWindowController:self.windowController]; }
+- (IBAction)findAllInSelection:(id)sender { [self performFindAction:FindActionFindAll        withWindowController:self.windowController]; }
+- (IBAction)findNext:(id)sender           { [self performFindAction:FindActionFindNext       withWindowController:self.windowController]; }
+- (IBAction)findPrevious:(id)sender       { [self performFindAction:FindActionFindPrevious   withWindowController:self.windowController]; }
+- (IBAction)replaceAll:(id)sender         { [self performFindAction:FindActionReplaceAll     withWindowController:self.windowController]; }
+- (IBAction)replaceAndFind:(id)sender     { [self performFindAction:FindActionReplaceAndFind withWindowController:self.windowController]; }
 
 - (IBAction)saveAllDocuments:(id)sender
 {
@@ -254,6 +255,7 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 		}
 
 		self.closeWindowOnSuccess = action == FindActionFindNext && [[NSApp currentEvent] type] == NSKeyDown && to_s([NSApp currentEvent]) == utf8::to_s(NSCarriageReturnCharacter);
+		[OakPasteboard pasteboardWithName:NSFindPboard].auxiliaryOptionsForCurrent = nil;
 		[NSApp sendAction:@selector(performFindOperation:) to:nil from:self];
 	}
 	[self updateActionButtons:self];
@@ -396,7 +398,6 @@ NSString* const FFFindWasTriggeredByEnter = @"FFFindWasTriggeredByEnter";
 				FFMatch* firstMatch = [matches firstObject];
 				FFMatch* lastMatch  = [matches lastObject];
 				[documents addObject:@{
-					@"path"            : firstMatch.path,
 					@"identifier"      : [NSString stringWithCxxString:doc->identifier()],
 					@"firstMatchRange" : [NSString stringWithCxxString:[firstMatch match].range],
 					@"lastMatchRange"  : [NSString stringWithCxxString:[lastMatch match].range],
@@ -715,7 +716,10 @@ static NSAttributedString* AttributedStringForMatch (std::string const& text, si
 	{
 		NSUInteger selectionIndex = [[outlineView selectedRowIndexes] firstIndex];
 		FFMatch* selectedMatch    = [outlineView itemAtRow:selectionIndex];
-		document::show([selectedMatch match].document, _documentSearch.projectIdentifier ? oak::uuid_t(to_s(_documentSearch.projectIdentifier)) : document::kCollectionAny, [selectedMatch match].range, false);
+		auto doc = [selectedMatch match].document;
+		if(!doc->is_open())
+			doc->set_recent_tracking(false);
+		document::show(doc, _documentSearch.projectIdentifier ? oak::uuid_t(to_s(_documentSearch.projectIdentifier)) : document::kCollectionAny, [selectedMatch match].range, false);
 	}
 }
 
